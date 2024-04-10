@@ -50,7 +50,9 @@ class CrossEntropy(Loss):
         a single float representing the loss
         """
         ### YOUR CODE HERE ###
-        return ...
+        m = Y.shape[0]
+        loss = np.sum(np.diag(Y @ np.log(Y_hat).T))
+        return (-1/m) * loss
 
     def backward(self, Y: np.ndarray, Y_hat: np.ndarray) -> np.ndarray:
         """Backward pass of cross-entropy loss.
@@ -67,4 +69,5 @@ class CrossEntropy(Loss):
         predictions, `Y_hat`
         """
         ### YOUR CODE HERE ###
-        return ...
+        m = Y.shape[0]
+        return (-1/m) * (np.divide(Y,Y_hat))

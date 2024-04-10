@@ -14,7 +14,7 @@ fc1 = AttrDict(
         "name": "fully_connected",
         "activation": "relu",
         "weight_init": "xavier_uniform",
-        "n_out": 25,
+        "n_out": 3,
     }
 )
 
@@ -45,7 +45,7 @@ Step 3: Define model, data, and logger arguments
 optimizer_args = AttrDict(
     {
         "name": "SGD",
-        "lr": 0.01,
+        "lr": 0.005,
         "lr_scheduler": "constant",
         "lr_decay": 0.99,
         "stage_length": 1000,
