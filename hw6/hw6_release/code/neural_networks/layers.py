@@ -276,13 +276,36 @@ class Conv2D(Layer):
         kernel_height, kernel_width, in_channels, out_channels = W.shape
         n_examples, in_rows, in_cols, in_channels = X.shape
         kernel_shape = (kernel_height, kernel_width)
+        pad = self.pad[0]
 
         ### BEGIN YOUR CODE ###
+        #Padding
+        if self.pad != (0, 0):
+            xPad = np.pad(X, ((0,), (pad,), (pad,), (0,)), constant_values=(0))          
+        else:
+            xPad = X
+
+        hOut = int((in_cols + 2*pad - kernel_height) / self.stride) + 1
+        wOut = int((in_rows + 2*pad - kernel_width) / self.stride) + 1
+
+        #Declaring preactivation output
+        Z = np.empty((n_examples, wOut, hOut, out_channels))
 
         # implement a convolutional forward pass
+        for hIdx in range(hOut):
+            for wIdx in range(wOut):
+                window = xPad[:, wIdx*self.stride : wIdx*self.stride + kernel_width,
+                              hIdx*self.stride : hIdx*self.stride + kernel_height, :]
+                Z[:, wIdx, hIdx, :] = np.einsum('...whc, hwcd -> ...d', window, W) + b[0]
 
         # cache any values required for backprop
+        self.cache["X"] = X
+        self.cache["Z"] = Z
 
+        #Apply activation
+        out = self.activation(Z)
+
+        assert out.shape == (n_examples, wOut, hOut, out_channels), "Wrong output shape"
         ### END YOUR CODE ###
 
         return out
@@ -303,8 +326,57 @@ class Conv2D(Layer):
         shape (batch_size, in_rows, in_cols, in_channels)
         """
         ### BEGIN YOUR CODE ###
+        X = self.cache["X"]
+        Z = self.cache["Z"]
+
+        W = self.parameters["W"]
+        b = self.parameters["b"]
+
+        kernel_height, kernel_width, in_channels, out_channels = W.shape
+        n_examples, in_rows, in_cols, in_channels = X.shape
+        kernel_shape = (kernel_height, kernel_width)
+
+        wOut = dLdY.shape[1]
+        hOut = dLdY.shape[2]
+        pad = self.pad[0]
+
+        #padding X
+        if self.pad != (0, 0):
+            xPad = np.pad(X, ((0,), (pad,), (pad,), (0,)), constant_values=(0))               
+        else:
+            xPad = X
+        
+        #Gradients
+        paddedDx = np.zeros(xPad.shape)
+        dW = np.zeros(W.shape)
+        dLdZ = self.activation.backward(Z, dLdY)
 
         # perform a backward pass
+        for hIdx in range(hOut):
+            for wIdx in range(wOut):
+                hStart = hIdx * self.stride
+                hEnd = hIdx * self.stride + kernel_height
+                wStart = wIdx * self.stride
+                wEnd = wIdx * self.stride + kernel_width
+
+                xWindow = xPad[:, wStart:wEnd, hStart:hEnd, :]
+                for c in range(out_channels):
+                    print(dW.shape)
+                    print(paddedDx.shape)
+                    dW[:, :, :, c] += np.einsum('bwhc, b -> hwc', xWindow, dLdZ[:, wIdx, hIdx, c])
+                    paddedDx[:, wStart:wEnd, hStart:hEnd, :] += np.einsum('hwi, b -> bwhi', W[:, :, :, c], dLdZ[:, wIdx, hIdx, c])
+
+                
+                
+                # paddedDx[:, hIdx * self.stride : hIdx * self.stride + kernel_height,
+                #         wIdx * self.stride : wIdx * self.stride + kernel_width, :] += \
+                # 1 
+                        
+        dX = paddedDx[:,pad:-pad, pad:-pad, :]
+        db = dLdY.sum(axis=(0, 1, 2)).reshape(1, -1)
+        
+        self.gradients["W"] = dW
+        self.gradients["b"] = db
 
         ### END YOUR CODE ###
 
