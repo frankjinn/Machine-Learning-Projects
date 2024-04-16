@@ -6,6 +6,7 @@ Course: CS189/289A
 Website: github.com/sophiaas, github.com/sagnibak
 """
 
+from matplotlib.bezier import inside_circle
 import numpy as np
 from abc import ABC, abstractmethod
 
@@ -251,7 +252,7 @@ class Conv2D(Layer):
             self.pad = (self.pad, self.pad)
         else:
             raise ValueError("Invalid Pad mode found in self.pad.")
-
+    
     def forward(self, X: np.ndarray) -> np.ndarray:
         """Forward pass for convolutional layer. This layer convolves the input
         `X` with a filter of weights, adds a bias term, and applies an activation
@@ -276,27 +277,29 @@ class Conv2D(Layer):
         kernel_height, kernel_width, in_channels, out_channels = W.shape
         n_examples, in_rows, in_cols, in_channels = X.shape
         kernel_shape = (kernel_height, kernel_width)
-        pad = self.pad[0]
+        pad = self.pad
 
         ### BEGIN YOUR CODE ###
         #Padding
         if self.pad != (0, 0):
-            xPad = np.pad(X, ((0,), (pad,), (pad,), (0,)), constant_values=(0))          
+            xPad = np.pad(X, ((0,), (pad[0],), (pad[1],), (0,)), constant_values=(0))          
         else:
             xPad = X
 
-        hOut = int((in_cols + 2*pad - kernel_height) / self.stride) + 1
-        wOut = int((in_rows + 2*pad - kernel_width) / self.stride) + 1
+        hOut = int(1 + (in_rows + 2*pad[0] - kernel_height) / self.stride)
+        wOut = int(1 + (in_cols + 2*pad[1] - kernel_width) / self.stride)
 
         #Declaring preactivation output
-        Z = np.empty((n_examples, wOut, hOut, out_channels))
+        Z = np.empty((n_examples, hOut, wOut, out_channels))
 
         # implement a convolutional forward pass
         for hIdx in range(hOut):
             for wIdx in range(wOut):
-                window = xPad[:, wIdx*self.stride : wIdx*self.stride + kernel_width,
-                              hIdx*self.stride : hIdx*self.stride + kernel_height, :]
-                Z[:, wIdx, hIdx, :] = np.einsum('...whc, hwcd -> ...d', window, W) + b[0]
+                window = xPad[:, hIdx*self.stride : hIdx*self.stride + kernel_height,
+                              wIdx*self.stride : wIdx*self.stride + kernel_width, :]
+                for c in range(out_channels):
+                    Z[:, hIdx, wIdx, c] = np.sum(window*W[:, :, :, c], axis=(1,2,3)) + b[0, c]
+                # Z[:, wIdx, hIdx, :] = np.einsum('...whc, hwcd -> ...d', window, W) + b[0]
 
         # cache any values required for backprop
         self.cache["X"] = X
@@ -305,11 +308,11 @@ class Conv2D(Layer):
         #Apply activation
         out = self.activation(Z)
 
-        assert out.shape == (n_examples, wOut, hOut, out_channels), "Wrong output shape"
+        # assert out.shape == (n_examples, wOut, hOut, out_channels), "Wrong output shape"
         ### END YOUR CODE ###
 
         return out
-
+    
     def backward(self, dLdY: np.ndarray) -> np.ndarray:
         """Backward pass for conv layer. Computes the gradients of the output
         with respect to the input feature maps as well as the filter weights and
@@ -335,14 +338,22 @@ class Conv2D(Layer):
         kernel_height, kernel_width, in_channels, out_channels = W.shape
         n_examples, in_rows, in_cols, in_channels = X.shape
         kernel_shape = (kernel_height, kernel_width)
+        pad = self.pad
 
-        wOut = dLdY.shape[1]
-        hOut = dLdY.shape[2]
-        pad = self.pad[0]
+        ### BEGIN YOUR CODE ###
+        #Padding
+        if self.pad != (0, 0):
+            xPad = np.pad(X, ((0,), (pad[0],), (pad[1],), (0,)), constant_values=(0))          
+        else:
+            xPad = X
+
+        hOut = dLdY.shape[1]
+        wOut = dLdY.shape[2]
+        padH, padW = self.pad
 
         #padding X
         if self.pad != (0, 0):
-            xPad = np.pad(X, ((0,), (pad,), (pad,), (0,)), constant_values=(0))               
+            xPad = np.pad(X, ((0,), (pad[0],), (pad[1],), (0,)), constant_values=(0))          
         else:
             xPad = X
         
@@ -359,12 +370,12 @@ class Conv2D(Layer):
                 wStart = wIdx * self.stride
                 wEnd = wIdx * self.stride + kernel_width
 
-                xWindow = xPad[:, wStart:wEnd, hStart:hEnd, :]
+                xWindow = xPad[:, hStart:hEnd, wStart:wEnd, :]
+                paddedDx[:, hStart:hEnd, wStart:wEnd, :] += np.einsum('hwio, bo -> bhwi', W, dLdZ[:, hIdx, wIdx, :])
+                
                 for c in range(out_channels):
-                    print(dW.shape)
-                    print(paddedDx.shape)
-                    dW[:, :, :, c] += np.einsum('bwhc, b -> hwc', xWindow, dLdZ[:, wIdx, hIdx, c])
-                    paddedDx[:, wStart:wEnd, hStart:hEnd, :] += np.einsum('hwi, b -> bwhi', W[:, :, :, c], dLdZ[:, wIdx, hIdx, c])
+                    dW[:,:,:,c] += (xWindow * dLdY[:,hIdx,wIdx,c][:,None,None,None]).sum(axis=0)
+                   
 
                 
                 
@@ -372,7 +383,7 @@ class Conv2D(Layer):
                 #         wIdx * self.stride : wIdx * self.stride + kernel_width, :] += \
                 # 1 
                         
-        dX = paddedDx[:,pad:-pad, pad:-pad, :]
+        dX = paddedDx[:,pad[0]:-pad[0], pad[1]:-pad[1], :]
         db = dLdY.sum(axis=(0, 1, 2)).reshape(1, -1)
         
         self.gradients["W"] = dW
@@ -443,10 +454,45 @@ class Pool2D(Layer):
         pooled array of shape (batch_size, out_rows, out_cols, channels)
         """
         ### BEGIN YOUR CODE ###
+        n_examples, in_rows, in_cols, channels = X.shape
+        pad = self.pad[0]
+
+        ### BEGIN YOUR CODE ###
+        #Padding
+        if self.pad != (0, 0):
+            xPad = np.pad(X, ((0,), (pad,), (pad,), (0,)), constant_values=(0))          
+        else:
+            xPad = X
+
+        hOut = int((in_cols + 2*pad - self.kernel_shape[0]) / self.stride) + 1
+        wOut = int((in_rows + 2*pad - self.kernel_shape[1]) / self.stride) + 1
+
+        #Declaring preactivation output
+        X_pool = np.zeros((n_examples, wOut, hOut, channels))
+        indices = np.zeros_like(X_pool, dtype=int)
 
         # implement the forward pass
+        for rowIdx in range(hOut):
+            for colIdx in range(wOut):
+                rowStart = rowIdx * self.stride
+                rowEnd = rowStart + self.kernel_shape[1]
+                colStart = colIdx * self.stride
+                colEnd = colStart + self.kernel_shape[0]
+
+                window = xPad[:, rowStart:rowEnd, colStart:colEnd, :]
+
+                if self.mode == 'max':
+                    X_pool[:, rowIdx, colIdx, :] = np.max(window, axis = (1, 2))
+                    print(np.argmax(window, axis=1, keepdims=True).shape)
+                    indices[:, rowIdx, colIdx, :] = np.argmax(window, axis=1, keepdims=True)
+
+                elif self.mode == 'average':
+                    X_pool[:, rowIdx, colIdx, :] = self.pool_fn(window, axis=(1, 2))
 
         # cache any values required for backprop
+
+        if self.mode == 'max':
+            self.cache['indices'] = indices
 
         ### END YOUR CODE ###
 
@@ -466,13 +512,45 @@ class Pool2D(Layer):
         shape (batch_size, in_rows, in_cols, channels)
         """
         ### BEGIN YOUR CODE ###
+        indices = self.cache['indices']
 
         # perform a backward pass
-
+        if self.mode == 'max':
+            dX = self.backwardMaxPool(dLdY, indices)
+        elif self.mode == 'average':
+            dX = self.backward_average_pooling(dLdY)
+        
         ### END YOUR CODE ###
+        return dX
+    
+    def backwardMaxPool(self, dLdY, indices):
+        """Backward pass for max pooling"""
+        batch_size, out_rows, out_cols, channels = dLdY.shape
+        dX = np.zeros_like(indices)
 
+        for rowIdx in range(out_rows):
+            for colIdx in range(out_cols):
+                    rowStart = rowIdx * self.stride
+                    rowEnd = rowStart + self.kernel_shape[1]
+                    colStart = colIdx * self.stride
+                    colEnd = colStart + self.kernel_shape[0]
+                    dX[:, rowStart:rowEnd,
+                        colStart:colEnd, :] = dLdY[:, rowIdx, colIdx, :] / (self.kernel_shape[0] * self.kernel_shape[1])
         return dX
 
+    def backwardAveragePooling(self, dLdY, indices):
+        """Backward pass for max pooling"""
+        batch_size, out_rows, out_cols, channels = dLdY.shape
+        dX = np.zeros_like(indices)
+
+        for rowIdx in range(out_rows):
+            for colIdx in range(out_cols):
+                for c in range(channels):
+                    idx = indices[:, rowIdx, colIdx, c]
+                    dX[:, rowIdx * self.stride + idx // self.kernel_shape[0],
+                        colIdx * self.stride + idx % self.kernel_shape[1], c] = dLdY[:, rowIdx, colIdx, c]
+        return dX
+    
 class Flatten(Layer):
     """Flatten the input array."""
 
