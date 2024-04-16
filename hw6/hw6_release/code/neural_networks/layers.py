@@ -455,44 +455,47 @@ class Pool2D(Layer):
         """
         ### BEGIN YOUR CODE ###
         n_examples, in_rows, in_cols, channels = X.shape
-        pad = self.pad[0]
+        pad = self.pad
+        kernel_height, kernel_width = self.kernel_shape
 
         ### BEGIN YOUR CODE ###
         #Padding
         if self.pad != (0, 0):
-            xPad = np.pad(X, ((0,), (pad,), (pad,), (0,)), constant_values=(0))          
+            xPad = np.pad(X, ((0,), (pad[0],), (pad[1],), (0,)), constant_values=(0))          
         else:
             xPad = X
 
-        hOut = int((in_cols + 2*pad - self.kernel_shape[0]) / self.stride) + 1
-        wOut = int((in_rows + 2*pad - self.kernel_shape[1]) / self.stride) + 1
+        hOut = int(1 + (in_rows + 2*pad[0] - kernel_height) / self.stride)
+        wOut = int(1 + (in_cols + 2*pad[1] - kernel_width) / self.stride)
 
         #Declaring preactivation output
-        X_pool = np.zeros((n_examples, wOut, hOut, channels))
-        indices = np.zeros_like(X_pool, dtype=int)
+        X_pool = np.zeros((n_examples, hOut, wOut, channels))
+        indices = np.zeros((n_examples,kernel_height,channels), dtype=int)
 
         # implement the forward pass
-        for rowIdx in range(hOut):
-            for colIdx in range(wOut):
-                rowStart = rowIdx * self.stride
-                rowEnd = rowStart + self.kernel_shape[1]
-                colStart = colIdx * self.stride
-                colEnd = colStart + self.kernel_shape[0]
+        for hIdx in range(hOut):
+            for wIdx in range(wOut):
+                hStart = hIdx * self.stride
+                hEnd = hIdx * self.stride + kernel_height
+                wStart = wIdx * self.stride
+                wEnd = wIdx * self.stride + kernel_width
 
-                window = xPad[:, rowStart:rowEnd, colStart:colEnd, :]
+                xWindow = xPad[:, hStart:hEnd, wStart:wEnd, :]
 
                 if self.mode == 'max':
-                    X_pool[:, rowIdx, colIdx, :] = np.max(window, axis = (1, 2))
-                    print(np.argmax(window, axis=1, keepdims=True).shape)
-                    indices[:, rowIdx, colIdx, :] = np.argmax(window, axis=1, keepdims=True)
+                    X_pool[:, hIdx, wIdx, :] = self.pool_fn(xWindow, axis = (1, 2))
+                    # print("indices: ", indices.shape)
+                    # print(np.argmax(xWindow, axis=2).shape)
+                    indices = np.argmax(xWindow, axis=1, keepdims=True)
 
                 elif self.mode == 'average':
-                    X_pool[:, rowIdx, colIdx, :] = self.pool_fn(window, axis=(1, 2))
+                    X_pool[:, hIdx, wIdx, :] = self.pool_fn(xWindow, axis=(1, 2))
 
         # cache any values required for backprop
 
         if self.mode == 'max':
             self.cache['indices'] = indices
+        self.cache['X'] = X
 
         ### END YOUR CODE ###
 
@@ -513,6 +516,12 @@ class Pool2D(Layer):
         """
         ### BEGIN YOUR CODE ###
         indices = self.cache['indices']
+        X = self.cache['X']
+        batch_size, out_rows, out_cols, channels = dLdY.shape
+        dX = np.zeros_like(X)
+        hOut = dLdY.shape[1]
+        wOut = dLdY.shape[2]
+        kernel_height, kernel_width = self.kernel_shape
 
         # perform a backward pass
         if self.mode == 'max':
@@ -527,19 +536,23 @@ class Pool2D(Layer):
         """Backward pass for max pooling"""
         batch_size, out_rows, out_cols, channels = dLdY.shape
         dX = np.zeros_like(indices)
+        hOut = dLdY.shape[1]
+        wOut = dLdY.shape[2]
+        kernel_height, kernel_width = self.kernel_shape
 
-        for rowIdx in range(out_rows):
-            for colIdx in range(out_cols):
-                    rowStart = rowIdx * self.stride
-                    rowEnd = rowStart + self.kernel_shape[1]
-                    colStart = colIdx * self.stride
-                    colEnd = colStart + self.kernel_shape[0]
-                    dX[:, rowStart:rowEnd,
-                        colStart:colEnd, :] = dLdY[:, rowIdx, colIdx, :] / (self.kernel_shape[0] * self.kernel_shape[1])
+        for hIdx in range(hOut):
+            for wIdx in range(wOut):
+                hStart = hIdx * self.stride
+                hEnd = hIdx * self.stride + kernel_height
+                wStart = wIdx * self.stride
+                wEnd = wIdx * self.stride + kernel_width
+
+                indices
+                dX[:, hStart:hEnd, wStart:wEnd, :] = dLdY[:, hIdx, wIdx, :] 
         return dX
 
     def backwardAveragePooling(self, dLdY, indices):
-        """Backward pass for max pooling"""
+        """Backward pass for avg pooling"""
         batch_size, out_rows, out_cols, channels = dLdY.shape
         dX = np.zeros_like(indices)
 
