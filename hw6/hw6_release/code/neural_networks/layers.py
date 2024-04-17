@@ -470,7 +470,7 @@ class Pool2D(Layer):
 
         #Declaring preactivation output
         X_pool = np.zeros((n_examples, hOut, wOut, channels))
-        indices = np.zeros((n_examples,kernel_height,channels), dtype=int)
+        indices = np.zeros((hOut, wOut, channels, n_examples), dtype=int)
 
         # implement the forward pass
         for hIdx in range(hOut):
@@ -484,9 +484,11 @@ class Pool2D(Layer):
 
                 if self.mode == 'max':
                     X_pool[:, hIdx, wIdx, :] = self.pool_fn(xWindow, axis = (1, 2))
-                    # print("indices: ", indices.shape)
-                    # print(np.argmax(xWindow, axis=2).shape)
-                    indices = np.argmax(xWindow, axis=1, keepdims=True)
+                    
+                    for c in range(channels):
+                        flat = xWindow.flatten()
+                        argmax = np.argmax(np.split(flat, n_examples), axis = 1)
+                        indices[hIdx, wIdx, c] = argmax
 
                 elif self.mode == 'average':
                     X_pool[:, hIdx, wIdx, :] = self.pool_fn(xWindow, axis=(1, 2))
@@ -516,53 +518,44 @@ class Pool2D(Layer):
         """
         ### BEGIN YOUR CODE ###
         indices = self.cache['indices']
+        # print("indices: ", indices[0,0])
         X = self.cache['X']
         batch_size, out_rows, out_cols, channels = dLdY.shape
         dX = np.zeros_like(X)
         hOut = dLdY.shape[1]
         wOut = dLdY.shape[2]
         kernel_height, kernel_width = self.kernel_shape
+        pad = self.pad
 
-        # perform a backward pass
-        if self.mode == 'max':
-            dX = self.backwardMaxPool(dLdY, indices)
-        elif self.mode == 'average':
-            dX = self.backward_average_pooling(dLdY)
-        
-        ### END YOUR CODE ###
-        return dX
-    
-    def backwardMaxPool(self, dLdY, indices):
-        """Backward pass for max pooling"""
-        batch_size, out_rows, out_cols, channels = dLdY.shape
-        dX = np.zeros_like(indices)
-        hOut = dLdY.shape[1]
-        wOut = dLdY.shape[2]
-        kernel_height, kernel_width = self.kernel_shape
+        if self.pad != (0, 0):
+            xPad = np.pad(X, ((0,), (pad[0],), (pad[1],), (0,)), constant_values=(0))          
+        else:
+            xPad = X
 
         for hIdx in range(hOut):
             for wIdx in range(wOut):
-                hStart = hIdx * self.stride
-                hEnd = hIdx * self.stride + kernel_height
-                wStart = wIdx * self.stride
-                wEnd = wIdx * self.stride + kernel_width
-
-                indices
-                dX[:, hStart:hEnd, wStart:wEnd, :] = dLdY[:, hIdx, wIdx, :] 
-        return dX
-
-    def backwardAveragePooling(self, dLdY, indices):
-        """Backward pass for avg pooling"""
-        batch_size, out_rows, out_cols, channels = dLdY.shape
-        dX = np.zeros_like(indices)
-
-        for rowIdx in range(out_rows):
-            for colIdx in range(out_cols):
                 for c in range(channels):
-                    idx = indices[:, rowIdx, colIdx, c]
-                    dX[:, rowIdx * self.stride + idx // self.kernel_shape[0],
-                        colIdx * self.stride + idx % self.kernel_shape[1], c] = dLdY[:, rowIdx, colIdx, c]
+                    hStart = hIdx * self.stride
+                    hEnd = hIdx * self.stride + kernel_height
+                    wStart = wIdx * self.stride
+                    wEnd = wIdx * self.stride + kernel_width
+                    xWindow = xPad[:, hStart:hEnd, wStart:wEnd, c]
+                if self.mode == "max":
+                    maxIdx = np.unravel_index(indices[hIdx, wIdx, c, :], (kernel_height, kernel_width))
+                    
+                    dX[:, hStart:hEnd, wStart:wEnd, c] += dLdY[:, hIdx, wIdx, c]
+
+                elif self.mode == "average":
+                    dy = dLdY[:, hIdx, wIdx, c]
+                    dX[:, hStart:hEnd, wStart:wEnd, c] += self.averageMatrix(dy)
+                    
+        ### END YOUR CODE ###
         return dX
+    
+    def averageMatrix(self, dLdY):
+        kernel_height, kernel_width = self.kernel_shape
+        average = dLdY / (kernel_height * kernel_width)
+        return np.ones(self.kernel_shape) * average
     
 class Flatten(Layer):
     """Flatten the input array."""
